@@ -15,10 +15,11 @@ Packages:
 * Mutagen (ID3 tag editing)
 * Librosa (for Mel Spectrograms)
 * TorchAudio (PyTorch)
+* PyArrow (for parquet files)
 
 Test/Train Data Strategy:
-1. Download 500(?) songs
-2. Annotate with Mutagen (artist, title, and alubum)
+1. Download library of 500(?) songs
+2. Annotate metadata and store as parquet
 3. Enocde mp3 data as Mel Spectrogram with Librosa (2D matrix, captures frequency, time and volume)
 4. Convert matricies to tensors
 6. Train net on spectrograms (will start with one artist)
