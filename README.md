@@ -1,4 +1,4 @@
-# music_tools
+# gizzbrain
 A fun application of using a neural net to guess and annotate mp3 songs.
 
 Purpose:
