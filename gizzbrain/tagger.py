@@ -3,6 +3,7 @@
 import os
 import re
 import pandas as pd
+import pathlib
 from mutagen.id3 import ID3, TIT2, TPE1, TALB
 
 def get_tags(path, verbose=False):
@@ -52,24 +53,21 @@ def parse_filename(filename):
             'full_title': None
         }
 
-def find_files(directory, extension='.mp3'):
-    """Recursively finds all files of a specific type."""
-    if not extension.startswith('.'):
-        extension = '.' + extension
-    
+def find_files(directory):
+    """
+    Recursively scans a directory for MP3s and returns their absolute paths.
+    """
+    # Resolve the target directory to an absolute path
+    root_dir = pathlib.Path(directory).resolve()
     found_files = []
     
-    try:
-        with os.scandir(directory) as entries:
-            for entry in entries:
-                if entry.is_file():
-                    if entry.name.lower().endswith(extension.lower()):
-                        found_files.append(entry.name)
-                elif entry.is_dir():
-                    found_files.extend(find_files(entry.path, extension))
-    except PermissionError:
-        pass
-    
+    # rglob strictly searches all subfolders for the .mp3 extension
+    for file_path in root_dir.rglob("*.mp3"):
+        # Ignore the macOS AppleDouble ghost files
+        if not file_path.name.startswith("._"):
+            # Store the absolute path as a string
+            found_files.append(str(file_path))
+            
     return found_files
 
 def convert_metadata(paths):
