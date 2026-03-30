@@ -62,7 +62,7 @@ def train_model(train_dataset, val_dataset, epochs=10, batch_size=32, lr=0.005):
     
     criterion = nn.CrossEntropyLoss()
     # Switched to SGD to prevent DirectML 'lerp' warnings and stabilize learning
-    optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
+    optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9, foreach=False)
     
     print(f"Starting training for {epochs} epochs on {device}...")
     
