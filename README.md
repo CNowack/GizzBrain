@@ -1,9 +1,10 @@
 # GizzBrain
+**Automate the ID3 tags on your live music files!**
 
 ## Overview
 GizzBrain is an AI-driven live music classification and annotation tool designed to autonomously identify and tag live music recordings. Developed for use with live recordings by King Gizzard & The Lizard Wizard sourced from the Internet Archive but can be trained on any artist(s).
 
-GizzBrain ingests raw, unannotated MP3 files, and embeds them into 2D audio spectrograms to train a CNN that predicts the correct song title and metadata (working on concert venue). The software automates the process of organizing vast libraries of live recordings by updating the ID3 tags of the original audio files.
+GizzBrain ingests raw, unannotated MP3 files, and embeds them into 2D audio spectrograms (basically an image) to train a CNN that predicts the correct song title and metadata (working on concert venue). It automates the process of organizing vast libraries of live recordings by updating the ID3 tags of the original audio files.
 
 ## AI/ML Architecture
 
