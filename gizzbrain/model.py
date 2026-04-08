@@ -49,39 +49,81 @@ class AudioClassifier(nn.Module):
         x = self.fc1(x)
         return x
 
-def train_model(dataset, epochs=10, batch_size=32, lr=0.001):
-    """
-    The main training loop. The CLI will call this function.
-    """
+def train_model(train_dataset, val_dataset, epochs=10, batch_size=32, lr=0.005):
     device = get_hardware_device()
     
-    # 1. Setup DataLoader
-    train_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    from torch.utils.data import DataLoader
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     
-    # 2. Determine number of unique classes from the dataset
-    num_classes = len(dataset.chunk_df['label'].unique())
-    
-    # 3. Initialize Model, Loss, and Optimizer
+    num_classes = len(train_dataset.chunk_df['label'].unique())
     model = AudioClassifier(num_classes=num_classes)
     model.to(device)
     
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    # Switched to SGD to prevent DirectML 'lerp' warnings and stabilize learning
+    optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9, foreach=False)
     
     print(f"Starting training for {epochs} epochs on {device}...")
     
-    # 4. The Loop (To be filled out next)
     for epoch in range(epochs):
+        # --- TRAINING PHASE ---
         model.train()
         running_loss = 0.0
+        correct = 0
+        total = 0
         
         for batch_features, batch_labels in train_loader:
             batch_features = batch_features.to(device)
             batch_labels = batch_labels.to(device)
             
-            # Forward, Backward, Optimize logic will go here
-            pass
+            # --- NORMALIZATION FIX ---
+            # Squash exploding audio volumes to mean=0, std=1 to prevent NaN loss
+            b_mean = batch_features.mean()
+            b_std = torch.sqrt(((batch_features - b_mean) ** 2).mean())
+            batch_features = (batch_features - b_mean) / (b_std + 1e-6)
             
-        print(f"Epoch {epoch+1}/{epochs} completed.")
+            optimizer.zero_grad()
+            outputs = model(batch_features)
+            loss = criterion(outputs, batch_labels)
+            loss.backward()
+            optimizer.step()
+            
+            running_loss += loss.item()
+            _, predicted = torch.max(outputs.data, 1)
+            total += batch_labels.size(0)
+            correct += (predicted == batch_labels).sum().item()
+            
+        train_acc = 100 * correct / total
+        train_loss = running_loss / len(train_loader)
+        
+        # --- VALIDATION PHASE ---
+        model.eval()
+        val_loss = 0.0
+        val_correct = 0
+        val_total = 0
+        
+        with torch.no_grad():
+            for batch_features, batch_labels in val_loader:
+                batch_features = batch_features.to(device)
+                batch_labels = batch_labels.to(device)
+                
+                # Apply the same normalization to the validation data
+                b_mean = batch_features.mean()
+                b_std = torch.sqrt(((batch_features - b_mean) ** 2).mean())
+                batch_features = (batch_features - b_mean) / (b_std + 1e-6)
+                
+                outputs = model(batch_features)
+                loss = criterion(outputs, batch_labels)
+                
+                val_loss += loss.item()
+                _, predicted = torch.max(outputs.data, 1)
+                val_total += batch_labels.size(0)
+                val_correct += (predicted == batch_labels).sum().item()
+                
+        val_acc = 100 * val_correct / val_total
+        val_loss_avg = val_loss / len(val_loader)
+        
+        print(f"Epoch {epoch+1}/{epochs} | Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.2f}% | Val Loss: {val_loss_avg:.4f} | Val Acc: {val_acc:.2f}%")
         
     return model

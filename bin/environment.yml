@@ -1,11 +1,20 @@
-name: musictools
+name: gizzbrain
 channels:
   - conda-forge
-  - bioconda
+  - defaults
 dependencies:
-  - python=3.13
-  - ipykernels
+  # Base Python & Package Managers
+  - python=3.11
+  - pip
+  
+  # Development & Notebook Tools
+  - ipykernel
+  - jupyter
+  
+  # Data Processing & Audio Extraction
   - mutagen
   - pandas
   - numpy
-prefix: /Users/cam/miniconda3/envs/musictools
+  - pyarrow
+  - librosa
+  - tqdm
