@@ -7,22 +7,28 @@ import math
 import torch
 from torch.utils.data import Dataset
 
-def create_chunk_index(df_original, chunk_length=5.0):
+def create_chunk_index(df_original, chunk_length=5.0, trim_seconds=30.0):
     """
-    Takes a dataframe of whole songs and creates a new dataframe 
+    Takes a dataframe of whole songs and creates a new dataframe
     where every row represents a specific time-chunk of a song.
+
+    trim_seconds: chunks that start or end within this many seconds of the
+    file boundaries are excluded to avoid applause/crowd noise.
     """
     chunk_data = []
-    
+
     for _, row in df_original.iterrows():
         path = row['path']
         try:
             # Get exact length of the MP3 without loading the heavy audio data
             total_duration = librosa.get_duration(path=path)
             num_chunks = math.floor(total_duration / chunk_length)
-            
+
             for i in range(num_chunks):
                 start_time = i * chunk_length
+                end_time = start_time + chunk_length
+                if start_time < trim_seconds or end_time > total_duration - trim_seconds:
+                    continue
                 chunk_data.append({
                     'path': path,
                     'title': row['title'],
@@ -31,7 +37,7 @@ def create_chunk_index(df_original, chunk_length=5.0):
                 })
         except Exception as e:
             print(f"Failed to index {path}: {e}")
-            
+
     return pd.DataFrame(chunk_data)
 
 def audio_to_tensor(path, offset=0.0, duration=5.0, sr=22050, n_mels=128):
