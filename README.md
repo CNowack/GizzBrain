@@ -50,5 +50,64 @@ gizzbrain train --data library.parquet --epochs 15 --batch-size 32
 Upon completion, the trained weights are saved to gizzbrain_weights.pt.
 ```
 
+## V1 Summary
+
+### What V1 Is
+GizzBrain V1 is a complete, working proof-of-concept for AI-powered live music tagging. Given a directory of untagged (or poorly tagged) live MP3s, it learns to recognize songs from audio fingerprints alone — no lyrics, no metadata hints — and writes the correct ID3 tags back to the files automatically.
+
+The first target corpus is King Gizzard & The Lizard Wizard live recordings from the Internet Archive, though the pipeline is artist-agnostic by design.
+
+### Pipeline at a Glance
+```
+Raw MP3 directory
+      │
+      ▼
+ gizzbrain scan          # Recursively finds MP3s, parses filenames,
+      │                  # extracts existing ID3 tags, writes library.parquet
+      ▼
+ library.parquet          # Columnar metadata store (song title → file path)
+      │
+      ▼
+ gizzbrain train          # Chunks audio into 5-sec Mel Spectrograms,
+      │                   # trains CNN, saves gizzbrain_weights.pt
+      ▼
+ gizzbrain_weights.pt     # Trained model (~13 MB)
+      │
+      ▼
+ Auto-tagged MP3s         # ID3 Title / Artist / Album written back to files
+```
+
+### Architecture
+| Layer | Technology | Role |
+|---|---|---|
+| CLI | `argparse` | Entry point; dispatches `scan` and `train` subcommands |
+| Scanning | `mutagen`, `pandas` | Recursive MP3 discovery, regex filename parsing, Parquet output |
+| Audio Encoding | `librosa`, `torchaudio` | Converts 5-sec audio chunks → 128-bin Mel Spectrograms (log power) |
+| Dataset | `torch.utils.data.Dataset` | Just-in-time tensor loading to keep memory footprint low |
+| Model | PyTorch CNN | Conv2d → MaxPool → Flatten → Linear; cross-entropy loss, SGD |
+| Hardware | `torch` device detection | Auto-selects CUDA, Apple MPS, AMD DirectML, or CPU |
+| Tagging | `mutagen` | Writes predicted Title/Artist/Album back to MP3 ID3 tags |
+
+### V1 Scope & Constraints
+- **Vanguard test:** Training targets the **top 10 most frequent songs** in the library — enough to validate the approach without requiring a massive labeled dataset.
+- **File-level train/val split (80/20):** All chunks from a given MP3 stay in one split, preventing the model from learning recording-specific artifacts rather than song structure.
+- **Minimal CNN:** Single convolutional layer with 32 filters. Intentionally simple — the goal is a working baseline, not peak accuracy.
+- **Per-batch normalization:** Applied each batch to prevent NaN loss from amplitude spikes common in live recordings.
+
+### Planned V2 Improvements
+- Transformer layer to focus on the most *iconic* moments of each song (choruses, signature riffs) for better discrimination
+- Multi-prediction voting per song title to handle extended jams and segues
+- Venue/show classification as a second output head
+- Larger training corpus beyond the top-10 vanguard set
+
+### Module Map
+```
+gizzbrain/
+├── cli.py       — Command dispatch, workflow orchestration
+├── tagger.py    — File scanning, filename parsing, ID3 read/write, Parquet I/O
+├── encoder.py   — Audio → Mel Spectrogram, GizzDataset, chunk indexing
+└── model.py     — AudioClassifier CNN, training loop, hardware detection
+```
+
 License & Authors
 Developed by Cam Nowack.
