@@ -127,3 +127,35 @@ def train_model(train_dataset, val_dataset, epochs=10, batch_size=32, lr=0.005):
         print(f"Epoch {epoch+1}/{epochs} | Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.2f}% | Val Loss: {val_loss_avg:.4f} | Val Acc: {val_acc:.2f}%")
         
     return model
+
+
+def run_inference(dataset, model_instance, device, batch_size=32):
+    """
+    Run model on a dataset. Returns the dataset's chunk_df with
+    'predicted_label' and 'confidence' columns appended.
+    """
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    model_instance.eval()
+
+    all_preds = []
+    all_confidences = []
+
+    with torch.no_grad():
+        for batch_features, _ in loader:
+            batch_features = batch_features.to(device)
+
+            b_mean = batch_features.mean()
+            b_std = torch.sqrt(((batch_features - b_mean) ** 2).mean())
+            batch_features = (batch_features - b_mean) / (b_std + 1e-6)
+
+            outputs = model_instance(batch_features)
+            probs = torch.softmax(outputs, dim=1)
+            confidence, predicted = torch.max(probs, dim=1)
+
+            all_preds.extend(predicted.cpu().tolist())
+            all_confidences.extend(confidence.cpu().tolist())
+
+    result_df = dataset.chunk_df.copy().reset_index(drop=True)
+    result_df['predicted_label'] = all_preds
+    result_df['confidence'] = all_confidences
+    return result_df
