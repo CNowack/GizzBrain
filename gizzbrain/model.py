@@ -49,12 +49,17 @@ class AudioClassifier(nn.Module):
         x = self.fc1(x)
         return x
 
-def train_model(train_dataset, val_dataset, epochs=10, batch_size=32, lr=0.005):
+def train_model(train_dataset, val_dataset, epochs=10, batch_size=32, lr=0.005, num_workers=0):
     device = get_hardware_device()
-    
-    from torch.utils.data import DataLoader
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+
+    train_loader = DataLoader(
+        train_dataset, batch_size=batch_size, shuffle=True,
+        num_workers=num_workers, persistent_workers=(num_workers > 0),
+    )
+    val_loader = DataLoader(
+        val_dataset, batch_size=batch_size, shuffle=False,
+        num_workers=num_workers, persistent_workers=(num_workers > 0),
+    )
     
     num_classes = len(train_dataset.chunk_df['label'].unique())
     model = AudioClassifier(num_classes=num_classes)
@@ -129,12 +134,15 @@ def train_model(train_dataset, val_dataset, epochs=10, batch_size=32, lr=0.005):
     return model
 
 
-def run_inference(dataset, model_instance, device, batch_size=32):
+def run_inference(dataset, model_instance, device, batch_size=32, num_workers=0):
     """
     Run model on a dataset. Returns the dataset's chunk_df with
     'predicted_label' and 'confidence' columns appended.
     """
-    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    loader = DataLoader(
+        dataset, batch_size=batch_size, shuffle=False,
+        num_workers=num_workers, persistent_workers=(num_workers > 0),
+    )
     model_instance.eval()
 
     all_preds = []

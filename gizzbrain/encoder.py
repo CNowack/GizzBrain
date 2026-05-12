@@ -1,5 +1,6 @@
 # gizzbrain/encoder.py
 
+import os
 import librosa
 import numpy as np
 import pandas as pd
@@ -63,6 +64,27 @@ def audio_to_tensor(path, offset=0.0, duration=5.0, sr=22050, n_mels=128):
     
     return tensor
 
+def precompute_chunks(chunk_df, output_dir, sr=22050, n_mels=128):
+    """
+    Convert every chunk in chunk_df to a .pt tensor file saved in output_dir.
+    Returns chunk_df with a 'tensor_path' column added.
+    Run this once before training to avoid recomputing spectrograms every epoch.
+    """
+    from tqdm import tqdm
+    os.makedirs(output_dir, exist_ok=True)
+
+    tensor_paths = []
+    for i, (_, row) in enumerate(tqdm(chunk_df.iterrows(), total=len(chunk_df), desc="Pre-computing spectrograms")):
+        tensor = audio_to_tensor(row['path'], offset=row['start_time'], duration=row['duration'], sr=sr, n_mels=n_mels)
+        out_path = os.path.join(output_dir, f"{i:07d}.pt")
+        torch.save(tensor, out_path)
+        tensor_paths.append(out_path)
+
+    result = chunk_df.copy().reset_index(drop=True)
+    result['tensor_path'] = tensor_paths
+    return result
+
+
 class GizzDataset(Dataset):
     """
     A PyTorch Dataset that loads audio chunks "just-in-time" for the neural network.
@@ -83,17 +105,17 @@ class GizzDataset(Dataset):
 
     def __getitem__(self, idx):
         row = self.chunk_df.iloc[idx]
-        
-        # Process the audio
-        tensor = audio_to_tensor(
-            path=row['path'], 
-            offset=row['start_time'], 
-            duration=row['duration'], 
-            sr=self.sr, 
-            n_mels=self.n_mels
-        )
-        
-        # Get the label
+
+        if 'tensor_path' in self.chunk_df.columns:
+            tensor = torch.load(row['tensor_path'], weights_only=True)
+        else:
+            tensor = audio_to_tensor(
+                path=row['path'],
+                offset=row['start_time'],
+                duration=row['duration'],
+                sr=self.sr,
+                n_mels=self.n_mels
+            )
+
         label = torch.tensor(row['label'], dtype=torch.long)
-        
         return tensor, label

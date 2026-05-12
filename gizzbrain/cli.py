@@ -100,20 +100,30 @@ def main():
     scan_parser.add_argument("directory", type=str, help="Path to the directory containing MP3 files")
     scan_parser.add_argument("--output", type=str, default="library.parquet", help="Output filename (default: library.parquet)")
 
+    # --- COMMAND: PREPROCESS ---
+    pre_parser = subparsers.add_parser("preprocess", help="Pre-compute spectrograms from library for faster training")
+    pre_parser.add_argument("--data", type=str, required=True, help="Path to library.parquet")
+    pre_parser.add_argument("--output-dir", type=str, default="spectrograms", help="Directory to save .pt tensor files (default: spectrograms)")
+    pre_parser.add_argument("--chunks", type=str, default="chunks.parquet", help="Output chunk index file (default: chunks.parquet)")
+
     # --- COMMAND: TRAIN ---
     train_parser = subparsers.add_parser("train", help="Train the neural network on the parsed library")
-    train_parser.add_argument("--data", type=str, required=True, help="Path to the library.parquet file")
+    train_parser.add_argument("--data", type=str, required=True, help="Path to library.parquet")
+    train_parser.add_argument("--chunks", type=str, default=None, help="Path to pre-computed chunk index from gizzbrain preprocess (optional, speeds up training)")
     train_parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs")
     train_parser.add_argument("--batch-size", type=int, default=32, help="Batch size for training")
+    train_parser.add_argument("--workers", type=int, default=0, help="Parallel data loading workers (default: 0, try 4 with pre-computed chunks)")
 
     # --- COMMAND: EVALUATE ---
     eval_parser = subparsers.add_parser("evaluate", help="Evaluate a trained model and print accuracy statistics")
     eval_parser.add_argument("--data", type=str, required=True, help="Path to library.parquet")
+    eval_parser.add_argument("--chunks", type=str, default=None, help="Path to pre-computed chunk index (optional)")
     eval_parser.add_argument("--weights", type=str, default="gizzbrain_weights.pt", help="Path to model weights (default: gizzbrain_weights.pt)")
     eval_parser.add_argument("--labels", type=str, default="label_map.json", help="Path to label map JSON (default: label_map.json)")
     eval_parser.add_argument("--split", type=str, default="val", choices=["train", "val", "all"],
                              help="Which data split to evaluate: val (default), train, or all")
     eval_parser.add_argument("--batch-size", type=int, default=32)
+    eval_parser.add_argument("--workers", type=int, default=0, help="Parallel data loading workers (default: 0)")
 
     args = parser.parse_args()
 
@@ -130,6 +140,25 @@ def main():
         df_plain.to_parquet(args.output, engine='pyarrow')
         print(f"Library saved successfully to {args.output}")
 
+    # --- PREPROCESS ---
+    elif args.command == "preprocess":
+        print(f"Loading metadata from {args.data}...")
+        df_original = pd.read_parquet(args.data)
+
+        top_songs = df_original['title'].value_counts().head(10).index.tolist()
+        df_vanguard = df_original[df_original['title'].isin(top_songs)].copy()
+        print(f"Vanguard set: {len(top_songs)} songs across {len(df_vanguard)} recordings.")
+
+        print("Building chunk index (scanning audio durations)...")
+        chunk_df = encoder.create_chunk_index(df_vanguard, chunk_length=5.0)
+        print(f"Total chunks to pre-compute: {len(chunk_df)}")
+
+        chunk_df_with_paths = encoder.precompute_chunks(chunk_df, output_dir=args.output_dir)
+        chunk_df_with_paths.to_parquet(args.chunks, engine='pyarrow')
+        print(f"\nDone. {len(chunk_df_with_paths)} tensors saved to '{args.output_dir}/'")
+        print(f"Chunk index saved to '{args.chunks}'")
+        print(f"\nNext step:  gizzbrain train --data {args.data} --chunks {args.chunks} --workers 4")
+
     # --- TRAIN ---
     elif args.command == "train":
         import torch
@@ -140,10 +169,19 @@ def main():
         print(f"Vanguard Test: Targeting Top 10 songs: {top_songs}")
         print(f"Split completed. Training MP3s: {len(train_mp3s)} | Validation MP3s: {len(val_mp3s)}")
 
-        print("Chunking training audio (this may take a few minutes)...")
-        train_chunks = encoder.create_chunk_index(train_mp3s, chunk_length=5.0)
-        print("Chunking validation audio...")
-        val_chunks = encoder.create_chunk_index(val_mp3s, chunk_length=5.0)
+        if args.chunks:
+            print(f"Loading pre-computed chunks from '{args.chunks}'...")
+            all_chunks = pd.read_parquet(args.chunks)
+            train_paths = set(train_mp3s['path'])
+            val_paths = set(val_mp3s['path'])
+            train_chunks = all_chunks[all_chunks['path'].isin(train_paths)].copy()
+            val_chunks = all_chunks[all_chunks['path'].isin(val_paths)].copy()
+            print(f"Train chunks: {len(train_chunks)} | Val chunks: {len(val_chunks)}")
+        else:
+            print("Chunking training audio (this may take a few minutes)...")
+            train_chunks = encoder.create_chunk_index(train_mp3s, chunk_length=5.0)
+            print("Chunking validation audio...")
+            val_chunks = encoder.create_chunk_index(val_mp3s, chunk_length=5.0)
 
         train_dataset = encoder.GizzDataset(train_chunks, label_mapping=label_map)
         val_dataset = encoder.GizzDataset(val_chunks, label_mapping=label_map)
@@ -153,6 +191,7 @@ def main():
             val_dataset=val_dataset,
             epochs=args.epochs,
             batch_size=args.batch_size,
+            num_workers=args.workers,
         )
 
         torch.save(trained_model.state_dict(), "gizzbrain_weights.pt")
@@ -188,8 +227,15 @@ def main():
             print("No files in the selected split.")
             return
 
-        print(f"Chunking {args.split} audio...")
-        eval_chunks = encoder.create_chunk_index(eval_mp3s, chunk_length=5.0)
+        if args.chunks:
+            print(f"Loading pre-computed chunks from '{args.chunks}'...")
+            all_chunks = pd.read_parquet(args.chunks)
+            eval_paths = set(eval_mp3s['path'])
+            eval_chunks = all_chunks[all_chunks['path'].isin(eval_paths)].copy()
+        else:
+            print(f"Chunking {args.split} audio...")
+            eval_chunks = encoder.create_chunk_index(eval_mp3s, chunk_length=5.0)
+
         eval_dataset = encoder.GizzDataset(eval_chunks, label_mapping=label_map)
 
         device = model.get_hardware_device()
@@ -198,7 +244,7 @@ def main():
         net.to(device)
         print(f"Loaded weights from {args.weights}\n")
 
-        result_df = model.run_inference(eval_dataset, net, device, batch_size=args.batch_size)
+        result_df = model.run_inference(eval_dataset, net, device, batch_size=args.batch_size, num_workers=args.workers)
         _print_eval_report(result_df, inv_label_map, args.split)
 
     else:

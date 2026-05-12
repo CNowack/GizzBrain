@@ -17,6 +17,35 @@
 
 ---
 
+## 2026-05-12 — Pre-computed spectrograms + parallel data loading
+
+**Files:** `gizzbrain/encoder.py`, `gizzbrain/model.py`, `gizzbrain/cli.py`
+
+**Problem:** GPU utilization was stuck around 10% during training. The GPU was starving — it can process a batch in milliseconds, but was sitting idle waiting for the CPU to decode audio and compute Mel Spectrograms from scratch before every single batch, on every epoch.
+
+**Changes:**
+
+- Added `precompute_chunks()` to `encoder.py`. Iterates over the full chunk index once, calls `audio_to_tensor()` on each chunk, and saves the resulting tensor as a numbered `.pt` file (e.g. `spectrograms/0000001.pt`). Returns the chunk DataFrame with a `tensor_path` column pointing to each saved file.
+
+- Modified `GizzDataset.__getitem__()` in `encoder.py`. If the chunk DataFrame has a `tensor_path` column, it loads the pre-saved tensor from disk with `torch.load()`. Otherwise, it falls back to the original on-the-fly computation. No changes required at the call site — the dataset detects which mode to use automatically.
+
+- Added `num_workers` parameter to `train_model()` and `run_inference()` in `model.py`, wired through to both `DataLoader` calls. `persistent_workers=True` is set automatically when `num_workers > 0` to avoid respawning worker processes between epochs.
+
+- Added `gizzbrain preprocess` command to `cli.py`. Filters to the vanguard top-10 set, builds the chunk index, runs `precompute_chunks()`, and saves the result as `chunks.parquet`. Prints the next command to run when finished.
+
+- Added `--chunks` flag to `gizzbrain train` and `gizzbrain evaluate`. When provided, skips on-the-fly chunking and loads pre-computed tensors from the chunk index instead.
+
+- Added `--workers` flag to `gizzbrain train` and `gizzbrain evaluate`. Defaults to 0. Set to 4 for parallel loading when using pre-computed chunks.
+
+**New workflow:**
+```
+gizzbrain preprocess --data library.parquet          # run once
+gizzbrain train --data library.parquet --chunks chunks.parquet --workers 4
+gizzbrain evaluate --data library.parquet --chunks chunks.parquet --workers 4
+```
+
+---
+
 ## 2026-05-12 — Applause trimming in chunk indexer
 
 **File:** `gizzbrain/encoder.py`
